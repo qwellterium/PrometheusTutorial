@@ -1,0 +1,81 @@
+version: "3"
+
+networks:
+  monitoring:
+  host:
+services:
+  app:
+    image: starlette_app:1.0
+    container_name: monitoring_app
+    build:
+      context: ./App
+      dockerfile: Dockerfile
+    volumes:
+      - ./App/src/:/App/
+    networks:
+      # - host
+      - monitoring
+    # ports:
+    #   - 8000:8000
+    command: uvicorn --host 0.0.0.0 --port 8000 main:App
+
+  proxy-exporter:
+    image: nginx/nginx-prometheus-exporter
+    command: -nginx.scrape-uri=http://proxy/nginx_status
+    networks:
+      - monitoring
+
+  proxy:
+    image: nginx:1.19
+    environment:
+      - NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
+    volumes:
+      - ./nginx/:/etc/nginx/templates/
+    ports:
+      - 80:80
+    networks:
+      - host
+      - monitoring
+
+  node-exporter:
+    image: prom/node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.ignored-mount-points
+      - ^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)
+    # ports:
+    #   - 9100:9100
+
+    networks:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - "./prometheus:/etc/prometheus"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    ports:
+      - 9090:9090
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana
+    user: "0"
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana:/var/lib/grafana:rw
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+
+    networks:
+      - monitoring
+      - host
